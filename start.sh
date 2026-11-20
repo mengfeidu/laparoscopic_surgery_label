@@ -21,14 +21,14 @@ if [[ ! -x .venv/bin/python ]]; then
   "$PYTHON_BIN" -m venv .venv
 fi
 # The first launch installs the project; later launches reuse the environment.
-if ! .venv/bin/python -c 'import requests, PIL, jsonschema, dotenv; import importlib.metadata as m; assert m.version("laparoscopy-5hz") == "0.1.0"' >/dev/null 2>&1; then
+if ! .venv/bin/python -c 'import requests, PIL, jsonschema, dotenv; import importlib.metadata as m; from laparoscopy_5hz import __version__; assert m.version("laparoscopy-5hz") == __version__' >/dev/null 2>&1; then
   .venv/bin/python -m pip install -e .
 fi
 if [[ $# -eq 0 ]]; then
   exec .venv/bin/python -m laparoscopy_5hz --help
 fi
 case "$1" in
-  doctor|annotate|validate|schema|--help|-h|--version)
+  doctor|annotate|validate|schema|estimate|--help|-h|--version)
     exec .venv/bin/python -m laparoscopy_5hz "$@"
     ;;
   *)

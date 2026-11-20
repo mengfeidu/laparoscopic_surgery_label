@@ -1,11 +1,11 @@
-import base64
 import json
-from pathlib import Path
 import time
 
 import requests
 
 from .common import AnnotationError
+from .cost import safe_usage, summarize
+from .images import image_config, image_content
 from .schema import parse_response, resource, validate_result
 
 
@@ -16,7 +16,8 @@ def window_instruction(core, selected, timeline, ontology):
         "标签时间为原视频PTS减去首帧PTS；变帧率源视频的实际时间可略偏离0.2秒网格。"
         "图像按全片帧号和时间升序提供。上下文仅用于判读，输出必须裁剪到core。"
         "事件跨越core边界时仅输出其在本core内的部分；不要补写未观察到的操作结果。"
-        "边界使用已提供样本的帧号，或core起止边界。"
+        "起点使用已提供样本的帧号或core起点。终点不包含，可用最后支持帧加1，"
+        "并截断到core终点；采样间隔不代表定位精度。"
         "key_events.frame必须是core内实际提供图像的帧号。\n"
         + json.dumps({
             "core": [core["start_frame"], core["end_frame"]],
@@ -31,19 +32,15 @@ def window_instruction(core, selected, timeline, ontology):
     )
 
 
-def build_payload(model, core, selected, timeline, ontology, frame_dir, max_tokens, json_mode=False):
+def build_payload(model, core, selected, timeline, ontology, frame_dir, max_tokens, json_mode=False,
+                  delivery=None, prompt=None):
+    delivery = delivery or image_config()
     content = [{"type": "text", "text": window_instruction(core, selected, timeline, ontology)}]
-    for n in selected:
-        image = (Path(frame_dir) / f"{n:09d}.jpg").read_bytes()
-        content.append({"type": "text", "text": f"source_frame={n}; original_time={timeline['times'][n]:.6f}s"})
-        content.append({"type": "image_url", "image_url": {
-            "url": "data:image/jpeg;base64," + base64.b64encode(image).decode("ascii"),
-            "detail": "high",
-        }})
+    content += image_content(selected, timeline, frame_dir, delivery)
     payload = {
         "model": model, "temperature": 0, "max_tokens": max_tokens,
         "messages": [
-            {"role": "system", "content": resource("prompt_zh.txt")},
+            {"role": "system", "content": prompt if prompt is not None else resource("prompt_zh.txt")},
             {"role": "user", "content": content},
         ],
     }
@@ -61,11 +58,15 @@ class AnnotationClient:
         self.read_timeout = read_timeout
         self.session = session or requests.Session()
         self.sleep = sleeper or time.sleep
+        self.last_metadata = {}
 
     def annotate(self, payload, core, ontology, selected):
         correction = None
         history = []
+        self.last_metadata = {"attempt_records": history}
         for attempt in range(self.attempts):
+            record = {"attempt": attempt+1, "category": "unknown", "usage": {}}
+            history.append(record)
             request_payload = dict(payload)
             if correction:
                 request_payload["messages"] = payload["messages"] + [{
@@ -80,7 +81,7 @@ class AnnotationClient:
                     json=request_payload, timeout=(30, self.read_timeout), allow_redirects=False,
                 )
             except requests.RequestException:
-                history.append({"attempt": attempt+1, "category": "network_error"})
+                record["category"] = "network_error"
                 if attempt+1 == self.attempts:
                     raise AnnotationError("API 网络请求失败；未保存密钥或响应正文。") from None
                 self.sleep(min(0.8 * 2**attempt, 8))
@@ -88,13 +89,14 @@ class AnnotationClient:
             if response.status_code != 200:
                 status = response.status_code
                 # Retry only transient statuses, never a policy/authentication rejection.
-                history.append({"attempt": attempt+1, "category": "http_error", "status": status})
+                record.update(category="http_error", status=status)
                 if status not in {408, 429, 500, 502, 503, 504} or attempt+1 == self.attempts:
                     raise AnnotationError(f"API 返回 HTTP {status}；响应正文未写入日志。")
                 self.sleep(min(0.8 * 2**attempt, 8))
                 continue
             try:
                 body = response.json()
+                record["usage"] = safe_usage(body.get("usage"))
                 choices = body.get("choices")
                 if not isinstance(choices, list) or not choices:
                     raise AnnotationError("API 响应缺少 choices。")
@@ -109,31 +111,30 @@ class AnnotationClient:
                     content = "".join(x.get("text", "") for x in content if isinstance(x, dict))
                 if not content:
                     raise AnnotationError("API 返回空内容。")
-                result = parse_response(self.redactor.text(content))
+                result, parse_meta = parse_response(self.redactor.text(content), with_metadata=True)
                 result = validate_result(result, core, ontology, selected)
                 # Persist only a narrow, safe metadata allowlist; never the whole API body.
-                usage = body.get("usage")
-                safe_usage = {}
-                if isinstance(usage, dict):
-                    for name in ("prompt_tokens", "completion_tokens", "total_tokens"):
-                        value = usage.get(name)
-                        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
-                            safe_usage[name] = value
+                record["category"] = "validated"
                 response_model = body.get("model")
                 if not isinstance(response_model, str):
                     response_model = payload["model"]
-                return result, {
+                metadata = {
                     "requested_model": self.redactor.text(payload["model"]),
                     "response_model": self.redactor.text(response_model[:200]),
-                    "usage": safe_usage, "attempts": attempt+1, "prior_attempts": history,
+                    "usage": summarize(history), "attempts": attempt+1,
+                    "prior_attempts": history[:-1], "attempt_records": history,
+                    **parse_meta,
                 }
+                self.last_metadata = metadata
+                return result, metadata
             except AnnotationError as error:
                 correction = self.redactor.text(error)
                 if "拒绝此图像" in correction:
+                    record["category"] = "refusal"
                     raise
             except (ValueError, TypeError, KeyError, AttributeError):
                 correction = "API 响应结构或JSON解析失败"
-            history.append({"attempt": attempt+1, "category": "invalid_output"})
+            record["category"] = "invalid_output"
             if attempt+1 < self.attempts:
                 self.sleep(min(0.8 * 2**attempt, 8))
         raise AnnotationError("模型响应连续未通过校验：" + (correction or "未知格式错误"))

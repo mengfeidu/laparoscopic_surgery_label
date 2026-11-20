@@ -13,6 +13,8 @@ import sys
 from . import __version__
 from .client import AnnotationClient, build_payload, window_instruction
 from .common import AnnotationError, fingerprint, hash_file, read_json, save_json
+from .cost import append_metadata, export_usage, priced
+from .images import image_config, image_manifest
 from .schema import load_ontology, output_schema, resource, validate_result
 from .security import DEFAULT_MODEL, DEFAULT_URL, Redactor, api_key, load_environment, safe_base_url
 from .video import (
@@ -60,11 +62,20 @@ def parser():
     annotate.add_argument("--window-seconds", type=float, default=10)
     annotate.add_argument("--context-seconds", type=float, default=1)
     annotate.add_argument("--width", type=int, default=720, help="上传图像最大宽度，不放大原图")
-    annotate.add_argument("--max-images", type=int, default=100)
+    annotate.add_argument("--max-images", type=int, default=200, help="单窗口原始采样帧数上限（含上下文）")
     annotate.add_argument("--max-tokens", type=int, default=8000)
     annotate.add_argument("--attempts", type=int, default=3, help="瞬时失败／格式失败最多尝试次数")
     annotate.add_argument("--timeout", type=float, default=300, help="单次响应读取超时秒数")
     annotate.add_argument("--ontology", type=Path, help="JSON词表；未提供字段沿用默认词表")
+    annotate.add_argument("--prompt", type=Path, help="自定义知识库/system prompt；默认V0.4")
+    annotate.add_argument("--image-layout", choices=("individual", "grid"), default="grid")
+    annotate.add_argument("--image-detail", choices=("high", "low", "auto"), default="high")
+    annotate.add_argument("--frames-per-image", type=int, default=16)
+    annotate.add_argument("--grid-columns", type=int, default=4)
+    annotate.add_argument("--tile-width", type=int, default=320)
+    annotate.add_argument("--tile-height", type=int, default=256)
+    annotate.add_argument("--price-in", type=float, help="美元/M输入token；无默认价格")
+    annotate.add_argument("--price-out", type=float, help="美元/M输出token；无默认价格")
     annotate.add_argument("--json-mode", action="store_true", help="仅兼容接口支持时开启response_format")
     annotate.add_argument("--dry-run", action="store_true", help="准备真实帧和输入清单；无需密钥，不调用API")
     validate = sub.add_parser("validate", help="校验一个core的JSON，不调用模型")
@@ -74,6 +85,14 @@ def parser():
     schema = sub.add_parser("schema", help="导出含实际词表枚举的JSON Schema")
     schema.add_argument("--ontology", type=Path)
     schema.add_argument("--output", type=Path)
+    estimate = sub.add_parser("estimate", help="从dry-run的真实输入清单估算，不调用API")
+    estimate.add_argument("--output", required=True, type=Path)
+    estimate.add_argument("--image-tokens", type=float, default=1082,
+                          help="实测每上传图像token，网关/模型变化后须重测")
+    estimate.add_argument("--text-tokens", type=float, default=4500, help="每窗口文本预算，须按知识库与窗口调整")
+    estimate.add_argument("--output-tokens", type=float, default=1000, help="每窗口输出预算，须按事件密度调整")
+    estimate.add_argument("--price-in", type=float)
+    estimate.add_argument("--price-out", type=float)
     return root
 
 
@@ -125,6 +144,8 @@ def export_results(output, results, cores, failures, config, timeline, dry_run, 
         "format": "aggregate_with_window_provenance", "sampling_hz": SAMPLE_HZ,
         "frame_numbering": timeline["frame_numbering"],
         "model": config["model"],
+        "image_delivery": config["image_delivery"],
+        "prompt_sha256": config["prompt_sha256"],
         "status": "dry_run" if dry_run else "partial" if failures else "complete_candidate",
         "review_required": True,
         "coverage": {
@@ -134,7 +155,9 @@ def export_results(output, results, cores, failures, config, timeline, dry_run, 
         },
         "scene_summaries": scenes, "events": events,
         "uncertain_ranges": uncertain, "key_events": key_events,
-        "note": "模型候选标注。跨core片段不自动合并；未调用／失败的core不伪装成已复核。",
+        "note": "模型候选标注，须人工确认。拼图保留采样帧但缩小局部细节，"
+                "与逐帧的标注质量等价未建立。跨core片段不自动合并；"
+                "未调用／失败的core不伪装成已复核。",
     }
     save_json(output / "annotations.json", redactor.value(aggregate))
     fields = [
@@ -169,6 +192,14 @@ def annotate(args, redactor):
     model, base = _configuration(args, redactor)
     key = None if args.dry_run else api_key()
     ontology = load_ontology(args.ontology)
+    prompt = args.prompt.read_text(encoding="utf-8") if args.prompt else resource("prompt_zh.txt")
+    if not prompt.strip():
+        raise AnnotationError("Prompt不能为空。")
+    if redactor.text(prompt) != prompt:
+        raise AnnotationError("Prompt包含密钥内容。")
+    delivery = image_config(args.image_layout, args.image_detail, args.frames_per_image,
+                            args.grid_columns, args.tile_width, args.tile_height)
+    priced({"prompt_tokens": 0, "completion_tokens": 0}, args.price_in, args.price_out)
     source = args.video.resolve()
     output = args.output.resolve()
     config = {
@@ -179,7 +210,8 @@ def annotate(args, redactor):
         "window_seconds": args.window_seconds, "context_seconds": args.context_seconds,
         "width": args.width, "model": model, "base_url": base,
         "ontology": ontology,
-        "prompt_sha256": hashlib.sha256(resource("prompt_zh.txt").encode("utf-8")).hexdigest(),
+        "prompt_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
+        "image_delivery": delivery,
         "schema_sha256": fingerprint(output_schema(ontology)),
         "max_images": args.max_images, "max_tokens": args.max_tokens, "json_mode": args.json_mode,
     }
@@ -229,6 +261,7 @@ def annotate(args, redactor):
                 "input_instruction": window_instruction(core, frames, timeline, ontology),
                 "image_files": [f"frames/{n:09d}.jpg" for n in frames],
                 "prompt_sha256": config["prompt_sha256"],
+                **image_manifest(frames, delivery),
             }
             save_json(output / "window_inputs" / f"{stem}.json", input_manifest)
             result_path = output / "windows" / f"{stem}.json"
@@ -246,10 +279,9 @@ def annotate(args, redactor):
             print(f"[{window_id+1}/{len(cores)}] core=[{core['start_frame']},{core['end_frame']})，{len(frames)}张图。")
             try:
                 payload = build_payload(model, core, frames, timeline, ontology, output / "frames",
-                                        args.max_tokens, args.json_mode)
+                                        args.max_tokens, args.json_mode, delivery, prompt)
                 result, meta = client.annotate(payload, core, ontology, frames)
                 save_json(result_path, result)
-                save_json(output / "call_metadata" / f"{stem}.json", redactor.value(meta))
                 failure_path = output / "failures" / f"{stem}.json"
                 if failure_path.exists():
                     failure_path.unlink()
@@ -265,7 +297,15 @@ def annotate(args, redactor):
                         failures.append({"window_id": pending_id, "core": cores[pending_id],
                                          "reason": "认证／权限错误后未发起请求"})
                     break
+            finally:
+                # Also retain unknown usage when Ctrl-C interrupts an in-flight request.
+                append_metadata(output / "call_metadata" / f"{stem}.json",
+                                redactor.value(client.last_metadata))
+                export_usage(output, args.price_in, args.price_out)
         aggregate = export_results(output, results, cores, failures, config, timeline, args.dry_run, redactor)
+        usage = export_usage(output, args.price_in, args.price_out)
+        print(f"累计已知token：输入 {usage['prompt_tokens']}，输出 {usage['completion_tokens']}；"
+              f"未知用量请求 {usage['unknown_usage_requests']}。")
         print(f"已校验 {len(results)}/{len(cores)} core；复用 {reused}；事件 {len(aggregate['events'])} 条。")
         if args.dry_run:
             print("dry-run完成：未调用API，未生成模型标注。去掉 --dry-run 可继续使用相同目录。")
@@ -289,6 +329,26 @@ def main():
                 save_json(args.output, schema)
             else:
                 print(json.dumps(schema, ensure_ascii=False, indent=2))
+            code = 0
+        elif args.command == "estimate":
+            budgets = (args.image_tokens, args.text_tokens, args.output_tokens)
+            if any(not math.isfinite(x) or x < 0 for x in budgets):
+                raise AnnotationError("Token预算必须是非负有限数。")
+            manifests = [read_json(p) for p in sorted(
+                (args.output/"window_inputs").glob("*.json"))]
+            if not manifests:
+                raise AnnotationError("请先annotate --dry-run准备真实输入清单。")
+            images = sum(m.get("uploaded_image_count", len(m["source_frames"])) for m in manifests)
+            report = {"windows": len(manifests), "uploaded_images": images,
+                      "prompt_tokens": images*args.image_tokens+len(manifests)*args.text_tokens,
+                      "completion_tokens": len(manifests)*args.output_tokens,
+                      "assumptions": {"image_tokens": args.image_tokens,
+                                      "text_tokens": args.text_tokens,
+                                      "output_tokens": args.output_tokens},
+                      "note": "预算估算，无API调用；不含重试，不保证成本或标注质量。"}
+            report.update(priced(report, args.price_in, args.price_out))
+            save_json(args.output/"estimate.json", report)
+            print(json.dumps(report, ensure_ascii=False, indent=2))
             code = 0
         else:
             result = read_json(args.file)

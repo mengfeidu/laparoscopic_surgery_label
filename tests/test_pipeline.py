@@ -15,6 +15,10 @@ from laparoscopy_5hz.common import AnnotationError
 from laparoscopy_5hz.schema import load_ontology, parse_response, resource, validate_result
 from laparoscopy_5hz.security import Redactor, safe_base_url
 from laparoscopy_5hz.video import make_cores, sample_source_frames
+from laparoscopy_5hz.cost import append_metadata, export_usage
+from laparoscopy_5hz.images import image_config, image_manifest, contact_sheet
+from PIL import Image
+import io
 
 CORE = {"start_frame": 5, "end_frame": 20, "start_seconds": .2, "end_seconds": .8}
 FRAMES = [0, 5, 10, 15, 20]
@@ -102,6 +106,25 @@ class SchemaTests(unittest.TestCase):
             with self.assertRaises(AnnotationError):
                 parse_response(text)
 
+    def test_newline_repair_is_explicit(self):
+        result, meta = parse_response('{"reviewed_end_\nframe":20}', with_metadata=True)
+        self.assertEqual(result, {"reviewed_end_frame":20})
+        self.assertTrue(meta["newline_repair_applied"])
+        self.assertFalse(parse_response('{\n"x":1\n}', with_metadata=True)[1]["newline_repair_applied"])
+        for text in ('{"x":1,\n"x":2}', '{"x":\nNaN}', '```\n{}\n```'):
+            with self.assertRaises(AnnotationError):
+                parse_response(text)
+
+    def test_end_may_be_last_supported_frame_plus_one(self):
+        result = empty_result()
+        event = example_event()
+        event["end_frame"] = 16
+        result["events"] = [event]
+        validate_result(result, CORE, self.ontology, FRAMES)
+        event["end_frame"] = 17
+        with self.assertRaises(AnnotationError):
+            validate_result(result, CORE, self.ontology, FRAMES)
+
     def test_custom_ontology_overrides_allowed_actions(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp)/"ontology.json"
@@ -146,6 +169,26 @@ class FakeSession:
 
 
 class ClientTests(unittest.TestCase):
+    def test_invalid_response_cost_is_included(self):
+        responses = [FakeResponse(200, {"usage":{"prompt_tokens":100,"completion_tokens":20},
+            "choices":[{"message":{"content":text}}]})
+            for text in ("invalid", json.dumps(empty_result()))]
+        client = AnnotationClient("http://localhost/v1", FAKE_CREDENTIAL, Redactor(),
+                                  session=FakeSession(responses), sleeper=lambda _:None)
+        _, meta = client.annotate({"model":"fixture","messages":[]}, CORE,load_ontology(),FRAMES)
+        self.assertEqual(meta["usage"]["prompt_tokens"],200)
+        self.assertEqual(meta["usage"]["completion_tokens"],40)
+        self.assertTrue(meta["usage"]["usage_complete"])
+
+    def test_failed_calls_have_auditable_usage(self):
+        session = FakeSession([FakeResponse(200,{"usage":{"prompt_tokens":100,"completion_tokens":20},
+            "choices":[{"message":{"content":"invalid"}}]})])
+        client = AnnotationClient("http://localhost/v1", FAKE_CREDENTIAL, Redactor(),attempts=1,
+                                  session=session, sleeper=lambda _:None)
+        with self.assertRaises(AnnotationError):
+            client.annotate({"model":"fixture","messages":[]},CORE,load_ontology(),FRAMES)
+        self.assertEqual(client.last_metadata["attempt_records"][0]["usage"]["prompt_tokens"],100)
+
     def test_auth_error_no_retry_no_key_in_exception(self):
         session = FakeSession([FakeResponse(401, {"error":FAKE_CREDENTIAL})])
         client = AnnotationClient("http://localhost/v1", FAKE_CREDENTIAL, Redactor([FAKE_CREDENTIAL]),
@@ -197,7 +240,8 @@ class OfflineIntegrationTests(unittest.TestCase):
                 requests_received.append(body)
                 params=json.loads(body["messages"][1]["content"][0]["text"].split("\n",1)[1])
                 core={"start_frame":params["core"][0],"end_frame":params["core"][1]}
-                response={"model":"offline_fixture","choices":[{"finish_reason":"stop",
+                response={"model":"offline_fixture","usage":{"prompt_tokens":100,"completion_tokens":20},
+                    "choices":[{"finish_reason":"stop",
                     "message":{"content":json.dumps(empty_result(core),ensure_ascii=False)}}]}
                 content=json.dumps(response,ensure_ascii=False).encode()
                 self.send_response(200)
@@ -225,6 +269,7 @@ class OfflineIntegrationTests(unittest.TestCase):
                 cmd=[sys.executable,"-m","laparoscopy_5hz","annotate","--video",str(video),
                      "--output",str(output),"--base-url",f"http://127.0.0.1:{server.server_port}/v1",
                      "--window-seconds","0.6","--context-seconds","0","--width","160"]
+                cmd += ["--image-layout","individual"]
                 def run(extra=()):
                     return subprocess.run(cmd+list(extra),cwd=tmp,env=env,text=True,capture_output=True)
                 dry=run(["--dry-run"])
@@ -244,9 +289,26 @@ class OfflineIntegrationTests(unittest.TestCase):
                 self.assertEqual(second.returncode,0,second.stderr)
                 self.assertEqual(len(requests_received),2)
                 self.assertIn("复用 2",second.stdout)
+                usage=json.loads((output/"usage.json").read_text())
+                self.assertEqual(usage["requests"],2)
+                self.assertEqual(usage["prompt_tokens"],200)
+                self.assertEqual(usage["completion_tokens"],40)
+                self.assertEqual(usage["unknown_usage_requests"],0)
+                self.assertTrue(usage["usage_complete"])
+                custom=tmp/"custom.txt"
+                custom.write_text("离线自定义知识库")
+                grid_cmd=cmd.copy()
+                grid_cmd[grid_cmd.index(str(output))]=str(tmp/"grid_output")
+                grid_cmd[grid_cmd.index("individual")]="grid"
+                grid_cmd += ["--prompt",str(custom)]
+                grid_run=subprocess.run(grid_cmd,cwd=tmp,env=env,text=True,capture_output=True)
+                self.assertEqual(grid_run.returncode,0,grid_run.stderr)
+                self.assertEqual(requests_received[-1]["messages"][0]["content"],custom.read_text())
+                content=requests_received[-1]["messages"][1]["content"]
+                self.assertEqual(sum(x["type"]=="image_url" for x in content),1)
                 mismatch=run(["--model","different-model"])
                 self.assertNotEqual(mismatch.returncode,0)
-                self.assertEqual(len(requests_received),2)
+                self.assertEqual(len(requests_received),4)
                 for file in output.rglob("*"):
                     if file.is_file() and file.suffix in {".json",".csv"}:
                         self.assertNotIn(FAKE_CREDENTIAL,file.read_text(encoding="utf-8-sig"))
@@ -255,6 +317,55 @@ class OfflineIntegrationTests(unittest.TestCase):
             server.shutdown()
             server.server_close()
             thread.join(timeout=2)
+
+
+class DeliveryCostTests(unittest.TestCase):
+    def test_grid_preserves_frames_and_labels(self):
+        config = image_config("grid", "high", 4, 2, 160, 128)
+        self.assertEqual(image_manifest([0,5,10,15,20], config)["image_groups"],
+                         [[0,5,10,15],[20]])
+        with tempfile.TemporaryDirectory() as tmp:
+            for n in [0,5,10,15]:
+                Image.new("RGB",(160,156),"red").save(Path(tmp)/f"{n:09d}.jpg")
+            data=contact_sheet([0,5,10,15],{"times":[n/25 for n in range(20)]},tmp,config)
+            self.assertEqual(Image.open(io.BytesIO(data)).size, (320,304))
+
+    def test_usage_resume_and_failure_history(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output=Path(tmp)
+            path=output/"call_metadata"/"window_00000.json"
+            append_metadata(path, {"attempt_records":[{"usage":{"prompt_tokens":100,"completion_tokens":10}}]})
+            append_metadata(path, {"attempt_records":[{"usage":{}},
+                                                      {"usage":{"prompt_tokens":200,"completion_tokens":20}}]})
+            first=export_usage(output,2,10)
+            second=export_usage(output,2,10)
+            self.assertEqual(first,second)
+            self.assertEqual(first["prompt_tokens"],300)
+            self.assertEqual(first["requests"],3)
+            self.assertEqual(first["unknown_usage_requests"],1)
+            self.assertAlmostEqual(first["estimated_usd"],.0009)
+
+    def test_missing_historical_usage_is_not_free(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output=Path(tmp)
+            (output/"windows").mkdir()
+            (output/"windows/window_00000.json").write_text("{}")
+            report=export_usage(output)
+            self.assertEqual(report["windows_without_usage"],1)
+            self.assertFalse(report["usage_complete"])
+
+    def test_legacy_metadata_retains_unknown_prior_attempts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output=Path(tmp)
+            path=output/"call_metadata/window_00000.json"
+            path.parent.mkdir()
+            path.write_text(json.dumps({"usage":{"prompt_tokens":100,"completion_tokens":10},
+                                        "attempts":3,"prior_attempts":[{"category":"invalid_output"}]}))
+            report=export_usage(output,2,10)
+            self.assertEqual(report["prompt_tokens"],100)
+            self.assertEqual(report["requests"],3)
+            self.assertEqual(report["unknown_usage_requests"],2)
+            self.assertTrue(report["estimated_usd_is_lower_bound"])
 
 
 if __name__ == "__main__":

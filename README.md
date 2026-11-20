@@ -9,7 +9,7 @@
 在这个工作区中，可直接运行下面的命令，无需密钥，也不会调用模型：
 
 ```bash
-cd /Users/bytedance/code/npj/laparoscopy_5hz
+cd /Users/bytedance/code/npj/laparoscopic_surgery_label
 bash start.sh \
   --video ../laparoscopy_annotation/assets/video.mp4 \
   --start 314 --end 324 \
@@ -17,7 +17,7 @@ bash start.sh \
   --dry-run
 ```
 
-这会准备原视频 314–324 秒的核心区间和前后各 1 秒上下文。输出里包含 60 张 5 Hz 图像；其中 50 张位于核心区间。每张图像单独保存，标明原视频全片帧号和时间。
+这会准备原视频 314–324 秒的核心区间和前后各 1 秒上下文。输出里包含 60 张 5 Hz 图像；其中 50 张位于核心区间。源帧逐张保存，上传时默认合成 4 张带帧号和时间的拼图，每张最多 16 帧，保持全部 5 Hz 样本。
 
 准备实际标注时，将 `.env.example` 复制为 `.env`，用编辑器在本机填入 `XHUB_API_KEY`：
 
@@ -49,11 +49,11 @@ bash start.sh \
 
 ## Prompt 与本次标注规范
 
-原文保存在 `laparoscopy_5hz/resources/prompt_zh.txt`，作为每次请求的 system prompt。它保留用户提供的判读规则、输出前复核要求、词表及 JSON 示例。程序只在 user 消息中补充本次 core、图像帧号、实际时间及 ontology。
+用户提供的《腹腔镜视频标注_Prompt_知识库V0.4.txt》原文保存在 `laparoscopy_5hz/resources/prompt_zh.txt`，作为每次请求的 system prompt。它保留判读规则、解剖与重建的证据约束、输出前复核要求、词表及 JSON 示例。程序只在 user 消息中补充本次 core、图像帧号、实际时间及 ontology。可通过 `--prompt /路径/知识库.txt` 替换；原文的 SHA256 纳入续跑指纹，变更知识库必须使用新输出目录。
 
 本版与之前的 2 fps 标注不同：
 
-- 采样固定为 **5 Hz**。逐张发送图像，不拼成联系表，不先做全片术式推断。
+- 采样固定为 **5 Hz**。默认以 4×4 拼图上传，逐格按时间读取；`--image-layout individual` 可改为逐帧上传。没有先做全片术式推断。
 - 一条 event 表示 **一个器械 × 一个动作 × 一个目标的连续交互**，允许多器械同时交互。
 - `grasp`、`retract`、`release` 分段；接近、单纯定位、静止及镜头活动不作为 event。
 - 工作端或交互证据不足时使用 `uncertain_ranges`，不补造动作。
@@ -94,7 +94,7 @@ bash start.sh \
 
 ## 窗口、上下文与边界
 
-默认核心窗口为 10 秒，前后上下文各 1 秒，顺序请求，每个窗口最多 100 张图。请求中明确告知核心范围、已提供的全片帧号及实际时间。模型可借助上下文判读，但输出只允许覆盖 core。
+默认核心窗口为 10 秒，前后上下文各 1 秒，顺序请求，每个窗口最多 200 个原始采样帧（`--max-images`，含上下文；不是拼图数量）。请求中明确告知核心范围、已提供的全片帧号及实际时间。模型可借助上下文判读，但输出只允许覆盖 core。
 
 ```bash
 bash start.sh --video /绝对路径/video.mp4 \
@@ -104,7 +104,7 @@ bash start.sh --video /绝对路径/video.mp4 \
   --output outputs/custom
 ```
 
-图片不放大源图，顶端时间标签位于手术画面外。core 划分保持半开区间；输出边界必须使用已提供的样本帧或 core 起止帧。关键事件必须定位到 core 内实际提供的图像。
+图片不放大源图，顶端时间标签位于手术画面外。core 划分保持半开区间；事件起点使用已提供的样本帧或 core 起点，终点可使用已提供样本、最后支持帧加 1 或 core 独占终点，并受 core 范围约束。关键事件必须定位到 core 内实际提供的图像。
 
 同一持续动作若跨多个 core，其在各 core 内的片段分别保留。**默认不自动跨 core 拼接**：指定输出格式没有稳定的器械实例 ID，不能仅凭“左侧抓钳”或相似目标安全判定为同一把器械。原始窗口结果不改动，汇总通过 window_id 和 event_id 保留出处，供人工连接边界片段。
 
@@ -125,10 +125,11 @@ bash start.sh schema --output /tmp/annotation.schema.json
 - reviewed 起止帧必须等于本次 core；
 - event 与 uncertain range 必须满足 `core_start <= start < end <= core_end`；
 - 关键事件必须在 core 中且对应真实输入样本；
-- 边界帧必须来自输入图像或 core 独占边界；
+- 起点必须来自输入样本或 core 起点；终点还允许样本帧加 1，且不能越出 core；
 - 完全重复的交互拒绝；不同器械的重叠交互保留；
 - 纱布为目标时 `mediator=none`；`wipe` 不能将纱布自身当作被擦组织；
-- 额外字段、未知代码、NaN、重复 JSON 键、Markdown 代码围栏均拒绝。
+- 额外字段、未知代码、NaN、重复 JSON 键、Markdown 代码围栏均拒绝；
+- 网关会在长补全中插入实际换行，甚至切开键名。严格解析失败且存在原始换行时，仅去掉 CR/LF 后重试，成功则记录 `newline_repair_applied=true`；不抽取围栏中的对象，不修复其他非法语法。
 
 单窗口文件校验：
 
@@ -149,16 +150,18 @@ outputs/<run>/
 ├── frames/                    # 带标签的逐张JPEG
 ├── window_inputs/             # 每个core的输入范围与图像清单
 ├── windows/                   # 原始单core JSON，严格使用指定输出格式
-├── call_metadata/             # 模型名称、允许列出的token统计、重试次数
+├── call_metadata/             # 每次请求的安全用量记录，含失败重试及多次续跑
 ├── failures/                  # 安全的失败类别，不保存响应正文
 ├── output.schema.json         # 本次实际词表的Schema
 ├── annotations.json           # 汇总封套：coverage、窗口摘要、events等
-└── events.csv                 # 帧号、秒数、代码、证据、结果和出处
+├── events.csv                 # 帧号、秒数、代码、证据、结果和出处
+├── usage.json                 # 历史累计已知用量、未知请求数、可选金额估算
+└── estimate.json              # 执行estimate后生成的预算估算
 ```
 
 `windows/window_*.json` 与用户指定格式一致。`annotations.json` 是带出处的汇总封套，不是单次模型回复；它区分 requested、reviewed 和 failed cores，避免把失败窗口伪装为“已读但无动作”。dry-run 不制造模型事件，状态为 `dry_run`。
 
-重复运行相同命令会校验并复用已完成窗口，仅请求尚未完成的窗口。视频内容、prompt、词表、模型、API 基地址、窗口、图像宽度或关键请求配置变化时，必须使用新的输出目录。输出目录带运行锁，避免两进程同时写同一缓存。
+重复运行相同命令会校验并复用已完成窗口，仅请求尚未完成的窗口。`usage.json` 会读回历史请求记录，复用不会把成本重置为零；HTTP 200 的无效输出也计入用量。网络超时、无用量响应及缺失的历史元数据明确标为未知，已知 token 合计是下界。中断时也保留当前请求的未知用量。视频内容、prompt、词表、模型、API 基地址、窗口、图像宽度、送图方式或关键请求配置变化时，必须使用新的输出目录。输出目录带运行锁，避免两进程同时写同一缓存。
 
 HTTP 408/429/5xx、暂时网络故障和不合格式输出有限重试；认证／权限错误和模型明确过滤拒绝不自动重试。需要自己处理的缺失区间会明确保留。格式失败时重发相同图像及安全的校验提示，不保存失败正文。接口不支持 JSON mode 时保持默认配置；只有确认支持时才使用 `--json-mode`。
 
@@ -175,8 +178,39 @@ bash start.sh doctor
 .venv/bin/python -m unittest discover -s tests -v
 ```
 
-已通过 14 项离线测试，覆盖原视频帧号、5 Hz 网格、半开区间、词表、自定义词表、并发器械、纱布语义、JSON 严格性、认证与拒绝处理、密钥脱敏、模拟接口和续跑。
+离线测试覆盖原视频帧号、5 Hz 网格、半开区间、词表、自定义词表与知识库、并发器械、纱布语义、JSON 换行修复、认证与拒绝处理、密钥脱敏、拼图、模拟接口及续跑费用审计。
 
 另用已有真实手术视频执行 314–324 秒 dry-run：原视频 17,921 帧、25 fps；core 为 `[7850,8100)`；核心 50 张、含上下文 60 张；相邻源样本相差 5 帧／0.2 秒。没有调用付费模型，没有将离线测试样例用作手术标注。
 
-真实 Gemini API 端到端调用尚未执行：启动时未配置 API key。填写本机配置后即可按上方命令启动。
+已执行真实 Gemini API 计量与 V0.4 标注；详见 [成本测量记录](docs/cost_calibration.md)。所有模型输出均为未人工确认的候选标注；程序校验通过不代表医学判断正确。
+
+## 成本与送图配置
+
+同一组 16 帧的真实计量中，逐帧上传为 17,693 输入 token，4×4 拼图为 1,468；扣除相同文本的 381 token 后，图像开销约从 1,082 token/帧降至 68 token/源帧。`detail=low` 与 `high` 一样计费，降低 `--width` 也不是可靠的省费手段。
+
+默认拼图每格最多 320×256 像素，保留帧序但降低局部细节。需要辨认小工作端、血管分支或针路时，可以改用 2×2（每格 640×512）或逐帧复核，并将复核费用计入总预算；拼图与逐帧的标注质量等价尚未建立。
+
+```bash
+# 默认4×4：每个10秒core约上传4张拼图
+bash start.sh --video /路径/video.mp4 --output outputs/grid \
+  --image-layout grid --frames-per-image 16 --grid-columns 4
+
+# 2×2：细节较大，图像用量约为4×4的4倍
+bash start.sh --video /路径/video.mp4 --output outputs/grid4 \
+  --frames-per-image 4 --grid-columns 2 --tile-width 640 --tile-height 512
+
+# 先dry-run，再按实际上传图像数做预算；单价必须显式提供
+bash start.sh estimate --output outputs/grid \
+  --image-tokens 1082 --text-tokens 4500 --output-tokens 1000 \
+  --price-in 2 --price-out 10
+
+# 实际调用时也可传单价，usage.json保留累计已知用量及估算美元
+bash start.sh --video /路径/video.mp4 --output outputs/grid \
+  --price-in 2 --price-out 10
+
+# 换模型/网关后，独立重测送图计费；每个模式成功后可续跑复用
+.venv/bin/python -m laparoscopy_5hz.benchmark_images \
+  --video /路径/video.mp4 --start 314 --frames 16 --output outputs/meter
+```
+
+`gemini-4-argon` 是网关名称，没有在程序中硬编码公开 Gemini 型号的价格。以上 `$2/$10` 仅为可替换试算参数（美元/M token），实际金额以账户适用价格和账单为准。`estimate` 不调用 API，不含失败重试，输出预算由用户调整；它不是实际用量记录。

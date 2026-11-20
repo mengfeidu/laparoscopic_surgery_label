@@ -1,0 +1,357 @@
+{
+  "measurement_date": "2026-11-21",
+  "model": "gemini-4-argon",
+  "base_url": "https://api3.xhub.chat/v1",
+  "sampling_hz": 5,
+  "money_is_estimate_not_invoice": true,
+  "reference_price": {
+    "input_usd_per_million": 2,
+    "output_usd_per_million": 10
+  },
+  "image_meter": [
+    {
+      "mode": "text_baseline",
+      "uploaded_images": 0,
+      "detail": "high",
+      "source_frames": 16,
+      "usage": {
+        "prompt_tokens": 381,
+        "completion_tokens": 9,
+        "total_tokens": 390
+      },
+      "net_image_prompt_tokens": 0
+    },
+    {
+      "mode": "individual_high",
+      "uploaded_images": 16,
+      "detail": "high",
+      "source_frames": 16,
+      "usage": {
+        "prompt_tokens": 17693,
+        "completion_tokens": 9,
+        "total_tokens": 17702
+      },
+      "net_image_prompt_tokens": 17312
+    },
+    {
+      "mode": "individual_low",
+      "uploaded_images": 16,
+      "detail": "low",
+      "source_frames": 16,
+      "usage": {
+        "prompt_tokens": 17693,
+        "completion_tokens": 9,
+        "total_tokens": 17702
+      },
+      "net_image_prompt_tokens": 17312
+    },
+    {
+      "mode": "montage_4x4_high",
+      "uploaded_images": 1,
+      "detail": "high",
+      "source_frames": 16,
+      "usage": {
+        "prompt_tokens": 1468,
+        "completion_tokens": 9,
+        "total_tokens": 1477
+      },
+      "net_image_prompt_tokens": 1087
+    },
+    {
+      "mode": "montage_4x4_low",
+      "uploaded_images": 1,
+      "detail": "low",
+      "source_frames": 16,
+      "usage": {
+        "prompt_tokens": 1468,
+        "completion_tokens": 9,
+        "total_tokens": 1477
+      },
+      "net_image_prompt_tokens": 1087
+    },
+    {
+      "mode": "montage_2x2_high",
+      "uploaded_images": 4,
+      "detail": "high",
+      "source_frames": 16,
+      "usage": {
+        "prompt_tokens": 4709,
+        "completion_tokens": 9,
+        "total_tokens": 4718
+      },
+      "net_image_prompt_tokens": 4328
+    }
+  ],
+  "annotation_runs": [
+    {
+      "run": "grid10",
+      "requested_seconds": [
+        314.0,
+        324.0
+      ],
+      "window_seconds": 10,
+      "context_seconds": 1,
+      "image_delivery": {
+        "layout": "grid",
+        "detail": "high",
+        "frames_per_image": 16,
+        "columns": 4,
+        "tile_width": 320,
+        "tile_height": 256
+      },
+      "prompt_sha256": "bd48189e0bb0b7c05c798b11a4d442d8dec749b6c64ad87b38115983ae1e7901",
+      "prepared_windows": 1,
+      "validated_windows": 1,
+      "source_frames_per_window": [
+        60
+      ],
+      "uploaded_images_per_window": [
+        4
+      ],
+      "usage": {
+        "prompt_tokens": 8786,
+        "completion_tokens": 574,
+        "total_tokens": 9360,
+        "requests": 1,
+        "unknown_usage_requests": 0,
+        "usage_complete": true,
+        "windows_without_usage": 0,
+        "note": "历史累计已知用量，含失败重试；未知用量未假定为零。金额仅按显式单价估算，非账单。",
+        "price_in_usd_per_million": 2.0,
+        "price_out_usd_per_million": 10.0,
+        "estimated_usd": 0.023312
+      },
+      "newline_repair_applied": [
+        true
+      ]
+    },
+    {
+      "run": "dense_grid10",
+      "requested_seconds": [
+        581.0,
+        601.0
+      ],
+      "window_seconds": 10,
+      "context_seconds": 1,
+      "image_delivery": {
+        "layout": "grid",
+        "detail": "high",
+        "frames_per_image": 16,
+        "columns": 4,
+        "tile_width": 320,
+        "tile_height": 256
+      },
+      "prompt_sha256": "bd48189e0bb0b7c05c798b11a4d442d8dec749b6c64ad87b38115983ae1e7901",
+      "prepared_windows": 2,
+      "validated_windows": 2,
+      "source_frames_per_window": [
+        60,
+        60
+      ],
+      "uploaded_images_per_window": [
+        4,
+        4
+      ],
+      "usage": {
+        "prompt_tokens": 17820,
+        "completion_tokens": 1136,
+        "total_tokens": 18956,
+        "requests": 2,
+        "unknown_usage_requests": 0,
+        "usage_complete": true,
+        "windows_without_usage": 0,
+        "note": "历史累计已知用量，含失败重试；未知用量未假定为零。金额仅按显式单价估算，非账单。",
+        "price_in_usd_per_million": 2.0,
+        "price_out_usd_per_million": 10.0,
+        "estimated_usd": 0.047
+      },
+      "newline_repair_applied": [
+        true,
+        true
+      ]
+    },
+    {
+      "run": "individual_short",
+      "requested_seconds": [
+        320.0,
+        323.2
+      ],
+      "window_seconds": 10,
+      "context_seconds": 0.0,
+      "image_delivery": {
+        "layout": "individual",
+        "detail": "high",
+        "frames_per_image": 16,
+        "columns": 4,
+        "tile_width": 320,
+        "tile_height": 256
+      },
+      "prompt_sha256": "bd48189e0bb0b7c05c798b11a4d442d8dec749b6c64ad87b38115983ae1e7901",
+      "prepared_windows": 1,
+      "validated_windows": 1,
+      "source_frames_per_window": [
+        16
+      ],
+      "uploaded_images_per_window": [
+        16
+      ],
+      "usage": {
+        "prompt_tokens": 21212,
+        "completion_tokens": 540,
+        "total_tokens": 21752,
+        "requests": 1,
+        "unknown_usage_requests": 0,
+        "usage_complete": true,
+        "windows_without_usage": 0,
+        "note": "历史累计已知用量，含失败重试；未知用量未假定为零。金额仅按显式单价估算，非账单。",
+        "price_in_usd_per_million": 2.0,
+        "price_out_usd_per_million": 10.0,
+        "estimated_usd": 0.047824
+      },
+      "newline_repair_applied": [
+        true
+      ]
+    },
+    {
+      "run": "grid_short",
+      "requested_seconds": [
+        320.0,
+        323.2
+      ],
+      "window_seconds": 10,
+      "context_seconds": 0.0,
+      "image_delivery": {
+        "layout": "grid",
+        "detail": "high",
+        "frames_per_image": 16,
+        "columns": 4,
+        "tile_width": 320,
+        "tile_height": 256
+      },
+      "prompt_sha256": "bd48189e0bb0b7c05c798b11a4d442d8dec749b6c64ad87b38115983ae1e7901",
+      "prepared_windows": 1,
+      "validated_windows": 1,
+      "source_frames_per_window": [
+        16
+      ],
+      "uploaded_images_per_window": [
+        1
+      ],
+      "usage": {
+        "prompt_tokens": 4959,
+        "completion_tokens": 417,
+        "total_tokens": 5376,
+        "requests": 1,
+        "unknown_usage_requests": 0,
+        "usage_complete": true,
+        "windows_without_usage": 0,
+        "note": "历史累计已知用量，含失败重试；未知用量未假定为零。金额仅按显式单价估算，非账单。",
+        "price_in_usd_per_million": 2.0,
+        "price_out_usd_per_million": 10.0,
+        "estimated_usd": 0.014088
+      },
+      "newline_repair_applied": [
+        true
+      ]
+    },
+    {
+      "run": "individual10",
+      "requested_seconds": [
+        314.0,
+        324.0
+      ],
+      "window_seconds": 10,
+      "context_seconds": 1,
+      "image_delivery": {
+        "layout": "individual",
+        "detail": "high",
+        "frames_per_image": 16,
+        "columns": 4,
+        "tile_width": 320,
+        "tile_height": 256
+      },
+      "prompt_sha256": "bd48189e0bb0b7c05c798b11a4d442d8dec749b6c64ad87b38115983ae1e7901",
+      "prepared_windows": 1,
+      "validated_windows": 0,
+      "source_frames_per_window": [
+        60
+      ],
+      "uploaded_images_per_window": [
+        60
+      ],
+      "usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+        "requests": 2,
+        "unknown_usage_requests": 2,
+        "usage_complete": false,
+        "windows_without_usage": 0,
+        "note": "历史累计已知用量，含失败重试；未知用量未假定为零。金额仅按显式单价估算，非账单。",
+        "price_in_usd_per_million": 2.0,
+        "price_out_usd_per_million": 10.0,
+        "estimated_usd": 0.0
+      },
+      "newline_repair_applied": [
+        null
+      ]
+    },
+    {
+      "run": "grid30",
+      "requested_seconds": [
+        314.0,
+        344.0
+      ],
+      "window_seconds": 30.0,
+      "context_seconds": 1,
+      "image_delivery": {
+        "layout": "grid",
+        "detail": "high",
+        "frames_per_image": 16,
+        "columns": 4,
+        "tile_width": 320,
+        "tile_height": 256
+      },
+      "prompt_sha256": "bd48189e0bb0b7c05c798b11a4d442d8dec749b6c64ad87b38115983ae1e7901",
+      "prepared_windows": 1,
+      "validated_windows": 0,
+      "source_frames_per_window": [
+        160
+      ],
+      "uploaded_images_per_window": [
+        10
+      ],
+      "usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+        "requests": 2,
+        "unknown_usage_requests": 2,
+        "usage_complete": false,
+        "windows_without_usage": 0,
+        "note": "历史累计已知用量，含失败重试；未知用量未假定为零。金额仅按显式单价估算，非账单。",
+        "price_in_usd_per_million": 2.0,
+        "price_out_usd_per_million": 10.0,
+        "estimated_usd": 0.0
+      },
+      "newline_repair_applied": [
+        null
+      ]
+    }
+  ],
+  "meter_unknown_usage_http_503_requests": 2,
+  "ten_second_sample": {
+    "windows": 3,
+    "prompt_tokens": 26606,
+    "completion_tokens": 1710,
+    "estimated_usd_per_window": 0.023437333333333334,
+    "extrapolated_10_minutes_usd": 1.4062400000000002,
+    "extrapolated_12_minutes_usd": 1.687488
+  },
+  "quality_status": "模型候选，未经人工真值确认。相同3.2秒片段的拼图/逐帧结果在器械和动作上冲突，无法判定谁正确。事件数不是准确率。",
+  "notes": [
+    "三10秒窗口的外推不含重试、局部细节复核及全片场景变化。",
+    "两组较大请求各两次网络超时，收费未知；两次拼图计量HTTP503亦未知。",
+    "不保存密钥、图像、请求体、原始响应或患者信息。"
+  ]
+}

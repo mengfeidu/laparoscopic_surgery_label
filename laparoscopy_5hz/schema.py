@@ -47,16 +47,26 @@ def _no_duplicate_keys(pairs):
     return result
 
 
-def parse_response(content):
+def parse_response(content, with_metadata=False):
     if not isinstance(content, str):
         raise AnnotationError("模型响应不是 JSON 文本。")
+    def reject_constant(_):
+        raise ValueError("JSON 不允许非有限数")
+    def decode(text):
+        return json.loads(text, object_pairs_hook=_no_duplicate_keys, parse_constant=reject_constant)
+    repaired = False
     try:
-        def reject_constant(_):
-            raise ValueError("JSON 不允许非有限数")
-        return json.loads(content, object_pairs_hook=_no_duplicate_keys, parse_constant=reject_constant)
+        result = decode(content)
     except (ValueError, TypeError):
-        # Never include response text in validation errors.
-        raise AnnotationError("模型未返回单个严格合法的 JSON 对象。") from None
+        if "\n" not in content and "\r" not in content:
+            raise AnnotationError("模型未返回单个严格合法的 JSON 对象。") from None
+        try:
+            result = decode(content.replace("\n", "").replace("\r", ""))
+            repaired = True
+        except (ValueError, TypeError):
+            # Fences, duplicate keys and NaN still fail; never extract a loose object.
+            raise AnnotationError("模型未返回单个严格合法的 JSON 对象。") from None
+    return (result, {"newline_repair_applied": repaired}) if with_metadata else result
 
 
 def validate_result(result, core, ontology, sampled_frames=None):
@@ -68,13 +78,14 @@ def validate_result(result, core, ontology, sampled_frames=None):
     if (result["reviewed_start_frame"], result["reviewed_end_frame"]) != (start, end):
         raise AnnotationError("reviewed 起止帧与本次 core 不一致。")
     allowed = None if sampled_frames is None else set(sampled_frames) | {start, end}
+    allowed_ends = None if allowed is None else allowed | {n+1 for n in sampled_frames}
     seen = set()
     for list_name in ("events", "uncertain_ranges"):
         for index, row in enumerate(result[list_name]):
             a, b = row["start_frame"], row["end_frame"]
             if not start <= a < b <= end:
                 raise AnnotationError(f"{list_name}[{index}] 越出 core 或起止顺序错误。")
-            if allowed is not None and (a not in allowed or b not in allowed):
+            if allowed is not None and (a not in allowed or b not in allowed_ends):
                 raise AnnotationError(f"{list_name}[{index}] 使用了未提供的边界帧。")
             if list_name == "events":
                 identity = (a, b, row["instrument_code"], row["tool_position"],

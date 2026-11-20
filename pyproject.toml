@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "laparoscopy-5hz"
-version = "0.1.0"
+version = "0.2.0"
 description = "Evidence-based 5 Hz laparoscopic video annotation with source-frame alignment"
 readme = "README.md"
 requires-python = ">=3.10"
