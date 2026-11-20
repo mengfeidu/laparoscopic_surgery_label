@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "laparoscopy-5hz"
+version = "0.1.0"
+description = "Evidence-based 5 Hz laparoscopic video annotation with source-frame alignment"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "requests>=2.31,<3",
+  "Pillow>=10,<13",
+  "jsonschema>=4.20,<5",
+  "python-dotenv>=1,<2",
+]
+
+[project.scripts]
+laparoscopy-annotate = "laparoscopy_5hz.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["laparoscopy_5hz*"]
+
+[tool.setuptools.package-data]
+laparoscopy_5hz = ["resources/*.txt", "resources/*.json"]

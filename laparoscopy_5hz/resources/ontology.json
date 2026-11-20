@@ -1,0 +1,9 @@
+{
+  "instrument_code": ["grasper", "dissector", "scissors", "electrocautery_hook", "bipolar_forceps", "ultrasonic_shears", "vessel_sealer", "suction_irrigation", "clip_applier", "needle_holder", "stapler", "laparoscope", "trocar", "insufflation_needle", "retractor", "retrieval_device", "unknown_forceps", "unknown"],
+  "action_code": ["grasp", "release", "retract", "blunt_dissect", "hook_tent", "energy_dissect", "coagulate", "cut", "clip", "aspirate", "irrigate", "compress", "wipe", "needle_drive", "pull_suture", "tie_knot", "staple", "place_material", "retrieve"],
+  "target_code": ["gallbladder", "liver", "liver_bed", "cystic_duct", "cystic_artery", "blood_vessel", "duct_structure", "connective_tissue", "fat", "omentum", "peritoneum", "bowel", "unknown_tissue", "blood_fluid", "clear_fluid", "gauze", "suture", "clip", "specimen", "retrieval_bag"],
+  "tool_position": ["upper_left", "lower_left", "left", "right", "upper_right", "lower_right", "center", "unknown"],
+  "target_certainty": ["clear", "inferred", "uncertain"],
+  "mediator": ["none", "gauze", "suture", "other"],
+  "key_events.kind": ["smoke", "red_fluid", "occlusion", "tool_change", "other"]
+}
